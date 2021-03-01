@@ -116,12 +116,12 @@ def config_cython():
         print("WARNING: Cython is not installed, will compile without cython module")
         return []
 
-
 setup(name='mxnet',
       version=__version__,
       description=open(os.path.join(CURRENT_DIR, 'README.md')).read(),
-      packages=find_packages(),
-      data_files=[('mxnet', [LIB_PATH[0]])],
+      packages=find_packages() + ['mxnet.libs'],
+      package_dir={'mxnet.libs':os.path.split(LIB_PATH[0])[0]},
+      package_data={'':[os.path.split(LIB_PATH[0])[0]+ '/*']},
       url='https://github.com/apache/incubator-mxnet',
       ext_modules=config_cython(),
       classifiers=[
