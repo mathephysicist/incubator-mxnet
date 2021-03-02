@@ -15,117 +15,163 @@
 # specific language governing permissions and limitations
 # under the License.
 
+# coding: utf-8
 # pylint: disable=invalid-name, exec-used
-"""Setup mxnet package."""
-from __future__ import absolute_import
+"""Setup mxnet package for pip."""
+from datetime import datetime
 import os
 import sys
-from setuptools import find_packages # This must precede distutils
+import shutil
+import platform
+from setuptools import setup, find_packages
 
-# need to use distutils.core for correct placement of cython dll
-kwargs = {}
-if "--inplace" in sys.argv:
-    from distutils.core import setup
-    from distutils.extension import Extension
-else:
-    from setuptools import setup
-    from setuptools.extension import Extension
-    kwargs = {'install_requires': ['numpy>=1.17', 'requests>=2.20.0,<3', 'graphviz<0.9.0,>=0.8.1', 'contextvars;python_version<"3.7"'], 'zip_safe': False}
-
-with_cython = False
-if '--with-cython' in sys.argv:
-    with_cython = True
-    sys.argv.remove('--with-cython')
+if platform.system() == 'Linux':
+    sys.argv.append('--python-tag')
+    sys.argv.append('py3')
+    sys.argv.append('--plat-name=manylinux2014_x86_64')
+elif platform.system() == 'Darwin':
+    sys.argv.append('--python-tag')
+    sys.argv.append('py3')
+    sys.argv.append('--plat-name=macosx_10_13_x86_64')
 
 # We can not import `mxnet.info.py` in setup.py directly since mxnet/__init__.py
 # Will be invoked which introduces dependences
 CURRENT_DIR = os.path.dirname(__file__)
-libinfo_py = os.path.join(CURRENT_DIR, 'mxnet/libinfo.py')
+libinfo_py = os.path.join(CURRENT_DIR, './mxnet/libinfo.py')
 libinfo = {'__file__': libinfo_py}
 exec(compile(open(libinfo_py, "rb").read(), libinfo_py, 'exec'), libinfo, libinfo)
 
 LIB_PATH = libinfo['find_lib_path']()
 __version__ = libinfo['__version__']
 
-sys.path.insert(0, CURRENT_DIR)
+# set by the CD pipeline
+is_release = os.environ.get("IS_RELEASE", "").strip()
 
-# Try to generate auto-complete code
+# set by the travis build pipeline
+travis_tag = os.environ.get("TRAVIS_TAG", "").strip()
+
+# nightly build tag
+if not travis_tag and not is_release:
+    __version__ += 'b{0}'.format(datetime.today().strftime('%Y%m%d'))
+
+# patch build tag
+elif travis_tag.startswith('patch-'):
+    __version__ = os.environ['TRAVIS_TAG'].split('-')[1]
+
+
+DEPENDENCIES = [
+    'numpy<2.0.0,>1.16.0',
+    'requests>=2.20.0,<3',
+    'graphviz<0.9.0,>=0.8.1',
+    'contextvars;python_version<"3.7"'
+]
+
+# copy tools to mxnet package
+shutil.rmtree(os.path.join(CURRENT_DIR, 'mxnet/tools'), ignore_errors=True)
+os.mkdir(os.path.join(CURRENT_DIR, 'mxnet/tools'))
+shutil.copy(os.path.join(CURRENT_DIR, '../tools/launch.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
+shutil.copy(os.path.join(CURRENT_DIR, '../tools/im2rec.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
+shutil.copy(os.path.join(CURRENT_DIR, '../tools/kill-mxnet.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
+shutil.copy(os.path.join(CURRENT_DIR, '../tools/parse_log.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
+shutil.copy(os.path.join(CURRENT_DIR, '../tools/diagnose.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
+shutil.copytree(os.path.join(CURRENT_DIR, '../tools/bandwidth'), os.path.join(CURRENT_DIR, 'mxnet/tools/bandwidth'))
+
+# copy headers to mxnet package
+shutil.rmtree(os.path.join(CURRENT_DIR, 'mxnet/include'), ignore_errors=True)
+os.mkdir(os.path.join(CURRENT_DIR, 'mxnet/include'))
+shutil.copytree(os.path.join(CURRENT_DIR, '../include/mxnet'),
+                os.path.join(CURRENT_DIR, 'mxnet/include/mxnet'))
+shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/dlpack/include/dlpack'),
+                os.path.join(CURRENT_DIR, 'mxnet/include/dlpack'))
+shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/dmlc-core/include/dmlc'),
+                os.path.join(CURRENT_DIR, 'mxnet/include/dmlc'))
+shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/mshadow/mshadow'),
+                os.path.join(CURRENT_DIR, 'mxnet/include/mshadow'))
+shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/tvm/nnvm/include/nnvm'),
+                os.path.join(CURRENT_DIR, 'mxnet/include/nnvm'))
+
+# copy cc file for mxnet extensions
+shutil.rmtree(os.path.join(CURRENT_DIR, 'mxnet/src'), ignore_errors=True)
+os.mkdir(os.path.join(CURRENT_DIR, 'mxnet/src'))
+shutil.copy(os.path.join(CURRENT_DIR, '../src/lib_api.cc'),
+            os.path.join(CURRENT_DIR, 'mxnet/src'))
+
+
+package_name = 'mxnet'
+
 try:
-    from mxnet.base import _generate_op_module_signature
-    from mxnet.ndarray.register import _generate_ndarray_function_code
-    from mxnet.symbol.register import _generate_symbol_function_code
-    _generate_op_module_signature('mxnet', 'symbol', _generate_symbol_function_code)
-    _generate_op_module_signature('mxnet', 'ndarray', _generate_ndarray_function_code)
-except: # pylint: disable=bare-except
-    pass
+    variant = os.environ['mxnet_variant'].upper()
+    if variant != 'CPU':
+        package_name = 'mxnet_{0}'.format(variant.lower())
+except KeyError as e:
+    print('Since variant is not provided variant will be cpu')
+    variant = 'CPU'
 
-def config_cython():
-    """Try to configure cython and return cython configuration"""
-    if not with_cython:
-        return []
-    # pylint: disable=unreachable
-    if os.name == 'nt':
-        print("WARNING: Cython is not supported on Windows, will compile without cython module")
-        return []
+def skip_markdown_comments(md):
+    lines = md.splitlines()
+    for i in range(len(lines)):
+        if lines[i].strip():
+            if not lines[i].startswith('<!--') or not lines[i].endswith('-->'):
+                return '\n'.join(lines[i:])
 
-    try:
-        from Cython.Build import cythonize
-        subdir = "_cy3"
-        ret = []
-        path = "mxnet/cython"
-        if os.name == 'nt':
-            library_dirs = ['mxnet', '../build/Release', '../build']
-            libraries = ['libmxnet']
-        else:
-            library_dirs = [os.path.dirname(p) for p in LIB_PATH]
-            libraries = ['mxnet']
-            # Default paths to libmxnet.so relative to the shared library file generated by cython.
-            # These precede LD_LIBRARY_PATH.
-            extra_link_args = ["-Wl,-rpath=$ORIGIN/..:$ORIGIN/../../../lib:$ORIGIN/../../../build"]
+with open(os.path.join(CURRENT_DIR,'../tools/pip/doc/PYPI_README.md') )as readme_file:
+    long_description = skip_markdown_comments(readme_file.read())
 
-        for fn in os.listdir(path):
-            if not fn.endswith(".pyx"):
-                continue
-            ret.append(Extension(
-                "mxnet.%s.%s" % (subdir, fn[:-4]),
-                ["mxnet/cython/%s" % fn],
-                include_dirs=["../include/", "../3rdparty/tvm/nnvm/include"],
-                library_dirs=library_dirs,
-                libraries=libraries,
-                extra_link_args=extra_link_args,
-                language="c++"))
+with open(os.path.join(CURRENT_DIR,'../tools/pip/doc/{0}_ADDITIONAL.md'.format(variant))) as variant_doc:
+    long_description = long_description + skip_markdown_comments(variant_doc.read())
 
-        path = "mxnet/_ffi/_cython"
-        for fn in os.listdir(path):
-            if not fn.endswith(".pyx"):
-                continue
-            ret.append(Extension(
-                "mxnet._ffi.%s.%s" % (subdir, fn[:-4]),
-                ["mxnet/_ffi/_cython/%s" % fn],
-                include_dirs=["../include/", "../3rdparty/tvm/nnvm/include"],
-                library_dirs=library_dirs,
-                libraries=libraries,
-                extra_compile_args=["-std=c++17"],
-                extra_link_args=extra_link_args,
-                language="c++"))
+short_description = 'MXNet is an ultra-scalable deep learning framework.'
+libraries = []
+if variant == 'CPU':
+    libraries.append('openblas')
+else:
+    if variant.startswith('CU112'):
+        libraries.append('CUDA-11.2')
+    elif variant.startswith('CU110'):
+        libraries.append('CUDA-11.0')
+    elif variant.startswith('CU102'):
+        libraries.append('CUDA-10.2')
+    elif variant.startswith('CU101'):
+        libraries.append('CUDA-10.1')
 
-        # If `force=True` is not used and you cythonize the modules for python2 and python3
-        # successively, you need to delete `mxnet/cython/ndarray.cpp` after the first cythonize.
-        return cythonize(ret, force=True)
-    except ImportError:
-        print("WARNING: Cython is not installed, will compile without cython module")
-        return []
+from mxnet.runtime import Features
+if Features().is_enabled("MKLDNN"):
+    libraries.append('MKLDNN')
 
-setup(name='mxnet',
+short_description += ' This version uses {0}.'.format(' and '.join(libraries))
+
+package_dir = {'mxnet.libs': os.path.relpath(os.path.dirname(LIB_PATH[0]),
+                                             os.path.commonprefix([__file__,LIB_PATH[0]])),
+                'mxnet.dmlc_tracker': '../3rdparty/dmlc-core/tracker/dmlc_tracker',
+                'mxnet.licenses':'../licenses'}
+package_data = {'mxnet.libs': [os.path.join(package_dir['mxnet.libs'],'*')],
+                'mxnet.dmlc_tracker': [os.path.join(package_dir['mxnet.dmlc_tracker'],'*')],
+                'mxnet.licenses':[os.path.join(package_dir['mxnet.licenses'],'*')]}
+
+if Features().is_enabled("MKLDNN"):
+    shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/mkldnn/include'),
+                    os.path.join(CURRENT_DIR, 'mxnet/include/mkldnn'))
+
+
+from mxnet.base import _generate_op_module_signature
+from mxnet.ndarray.register import _generate_ndarray_function_code
+from mxnet.symbol.register import _generate_symbol_function_code
+_generate_op_module_signature('mxnet', 'symbol', _generate_symbol_function_code)
+_generate_op_module_signature('mxnet', 'ndarray', _generate_ndarray_function_code)
+
+setup(name=package_name,
       version=__version__,
-      description=open(os.path.join(CURRENT_DIR, 'README.md')).read(),
-      packages=find_packages() + ['mxnet.libs'],
-      package_dir={'mxnet.libs':os.path.split(LIB_PATH[0])[0]},
-      package_data={'':[os.path.split(LIB_PATH[0])[0]+ '/*']},
-      url='https://github.com/apache/incubator-mxnet',
-      ext_modules=config_cython(),
-      classifiers=[
-          # https://pypi.org/pypi?%3Aaction=list_classifiers
+      long_description=long_description,
+      long_description_content_type='text/markdown',
+      description=short_description,
+      zip_safe=False,
+      packages=find_packages()+list(package_dir.keys()),
+      package_dir=package_dir,
+      package_data=package_data,
+      include_package_data=True,
+      install_requires=DEPENDENCIES,
+      license='Apache 2.0',
+      classifiers=[ # https://pypi.org/pypi?%3Aaction=list_classifiers
           'Development Status :: 5 - Production/Stable',
           'Intended Audience :: Developers',
           'Intended Audience :: Education',
@@ -144,4 +190,4 @@ setup(name='mxnet',
           'Topic :: Software Development :: Libraries',
           'Topic :: Software Development :: Libraries :: Python Modules',
       ],
-      **kwargs)
+      url='https://github.com/apache/incubator-mxnet')

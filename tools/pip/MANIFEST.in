@@ -20,15 +20,15 @@ include LICENSE
 include DISCLAIMER-WIP
 include NOTICE
 include mxnet/COMMIT_HASH
-recursive-include mxnet/tools *
-recursive-include mxnet *.py
-recursive-include mxnet *.so
-recursive-include mxnet *.so.*
-recursive-include mxnet *.dylib
-recursive-include mxnet *_LICENSE
-recursive-include mxnet *.h
-recursive-include mxnet *.hpp
-recursive-include mxnet *.cuh
-recursive-include mxnet *.cc
-recursive-include mxnet *.cpp
+recursive-include ../tools *
+recursive-include ../ *.py
+recursive-include ../ *.so
+recursive-include ../ *.so.*
+recursive-include ../ *.dylib
+recursive-include ../ *_LICENSE
+recursive-include ../ *.h
+recursive-include ../ *.hpp
+recursive-include ../ *.cuh
+recursive-include ../ *.cc
+recursive-include ../ *.cpp
 recursive-include dmlc_tracker *.py
