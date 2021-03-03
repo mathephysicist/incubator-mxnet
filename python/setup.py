@@ -66,35 +66,7 @@ DEPENDENCIES = [
     'contextvars;python_version<"3.7"'
 ]
 
-# copy tools to mxnet package
-shutil.rmtree(os.path.join(CURRENT_DIR, 'mxnet/tools'), ignore_errors=True)
-os.mkdir(os.path.join(CURRENT_DIR, 'mxnet/tools'))
-shutil.copy(os.path.join(CURRENT_DIR, '../tools/launch.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
-shutil.copy(os.path.join(CURRENT_DIR, '../tools/im2rec.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
-shutil.copy(os.path.join(CURRENT_DIR, '../tools/kill-mxnet.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
-shutil.copy(os.path.join(CURRENT_DIR, '../tools/parse_log.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
-shutil.copy(os.path.join(CURRENT_DIR, '../tools/diagnose.py'), os.path.join(CURRENT_DIR, 'mxnet/tools'))
-shutil.copytree(os.path.join(CURRENT_DIR, '../tools/bandwidth'), os.path.join(CURRENT_DIR, 'mxnet/tools/bandwidth'))
 
-# copy headers to mxnet package
-shutil.rmtree(os.path.join(CURRENT_DIR, 'mxnet/include'), ignore_errors=True)
-os.mkdir(os.path.join(CURRENT_DIR, 'mxnet/include'))
-shutil.copytree(os.path.join(CURRENT_DIR, '../include/mxnet'),
-                os.path.join(CURRENT_DIR, 'mxnet/include/mxnet'))
-shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/dlpack/include/dlpack'),
-                os.path.join(CURRENT_DIR, 'mxnet/include/dlpack'))
-shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/dmlc-core/include/dmlc'),
-                os.path.join(CURRENT_DIR, 'mxnet/include/dmlc'))
-shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/mshadow/mshadow'),
-                os.path.join(CURRENT_DIR, 'mxnet/include/mshadow'))
-shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/tvm/nnvm/include/nnvm'),
-                os.path.join(CURRENT_DIR, 'mxnet/include/nnvm'))
-
-# copy cc file for mxnet extensions
-shutil.rmtree(os.path.join(CURRENT_DIR, 'mxnet/src'), ignore_errors=True)
-os.mkdir(os.path.join(CURRENT_DIR, 'mxnet/src'))
-shutil.copy(os.path.join(CURRENT_DIR, '../src/lib_api.cc'),
-            os.path.join(CURRENT_DIR, 'mxnet/src'))
 
 
 package_name = 'mxnet'
@@ -140,17 +112,45 @@ if Features().is_enabled("MKLDNN"):
 
 short_description += ' This version uses {0}.'.format(' and '.join(libraries))
 
-package_dir = {'mxnet.libs': os.path.relpath(os.path.dirname(LIB_PATH[0]),
-                                             os.path.commonprefix([__file__,LIB_PATH[0]])),
-                'mxnet.dmlc_tracker': '../3rdparty/dmlc-core/tracker/dmlc_tracker',
-                'mxnet.licenses':'../licenses'}
-package_data = {'mxnet.libs': [os.path.join(package_dir['mxnet.libs'],'*')],
-                'mxnet.dmlc_tracker': [os.path.join(package_dir['mxnet.dmlc_tracker'],'*')],
-                'mxnet.licenses':[os.path.join(package_dir['mxnet.licenses'],'*')]}
+
+
+tools = ['launch.py','im2rec.py','kill-mxnet.py','parse_log.py','diagnose.py']
+
+# List of files/dirs to relocate (destination path, current_directory)
+#  if a list is provided we assume individual files are provided to include
+# all directories in destination path will be removed. Use following section
+#  if you need to copy specific files without removing directories
+relocate_dirs = {'mxnet/lib': '../lib',
+                'mxnet/dmlc_tracker': '../3rdparty/dmlc-core/tracker/dmlc_tracker',
+                'mxnet/licenses':'../licenses',
+                'mxnet/tools/bandwidth':'../tools/bandwidth/',
+                'mxnet/tools':[os.path.join('../tools/', name) for name in tools],
+                'mxnet/include/mxnet':'../include/mxnet',
+                'mxnet/include/dlpack':'../3rdparty/dlpack/include/dlpack',
+                'mxnet/include/dmlc':'../3rdparty/dmlc-core/include/dmlc',
+                'mxnet/include/nnvm': '../3rdparty/tvm/nnvm/include/nnvm',
+                'mxnet/include/mshadow': '../3rdparty/mshadow/mshadow',
+                'mxnet/src': ['../src/lib_api.cc'],
+               }
+#
+files = ['README.md','LICENSE','DISCLAIMER-WIP','NOTICE','COMMIT_HASH']
+for file in files:
+    try:
+        shutil.copy2(os.path.join('../',file),os.path.join('mxnet/',file))
+    except FileNotFoundError:
+        print('No such file found {}'.format(file))
 
 if Features().is_enabled("MKLDNN"):
-    shutil.copytree(os.path.join(CURRENT_DIR, '../3rdparty/mkldnn/include'),
-                    os.path.join(CURRENT_DIR, 'mxnet/include/mkldnn'))
+    relocate_dirs['mxnet/include/MKLDNN']: '../3rdparty/mkldnn/include'
+
+for k,dir in relocate_dirs.items():
+    if type(dir) == list:
+        files = []
+        for f in dir:
+            files.append(os.path.join(CURRENT_DIR,f))
+        relocate_dirs[k] = files
+    else:
+        relocate_dirs[k] = os.path.join(CURRENT_DIR,dir)
 
 
 from mxnet.base import _generate_op_module_signature
@@ -159,15 +159,29 @@ from mxnet.symbol.register import _generate_symbol_function_code
 _generate_op_module_signature('mxnet', 'symbol', _generate_symbol_function_code)
 _generate_op_module_signature('mxnet', 'ndarray', _generate_ndarray_function_code)
 
+for k in relocate_dirs.keys():
+    shutil.rmtree(k,ignore_errors=True)
+
+
+for k,v in relocate_dirs.items():
+    if type(v) == list:
+        if not os.path.exists(k):
+            os.makedirs(k)
+        for file in v:
+            shutil.copy2(file,k)
+    else:
+        shutil.copytree(v,k)
+
+
+
+
 setup(name=package_name,
       version=__version__,
       long_description=long_description,
       long_description_content_type='text/markdown',
       description=short_description,
       zip_safe=False,
-      packages=find_packages()+list(package_dir.keys()),
-      package_dir=package_dir,
-      package_data=package_data,
+      packages=find_packages(),
       include_package_data=True,
       install_requires=DEPENDENCIES,
       license='Apache 2.0',
@@ -191,3 +205,11 @@ setup(name=package_name,
           'Topic :: Software Development :: Libraries :: Python Modules',
       ],
       url='https://github.com/apache/incubator-mxnet')
+
+for file in files:
+    try:
+        os.remove(os.path.join('mxnet/',file))
+    except FileNotFoundError:
+        print('could not find file {}'.format(file))
+for k in relocate_dirs.keys():
+    shutil.rmtree(k,ignore_errors=True)
